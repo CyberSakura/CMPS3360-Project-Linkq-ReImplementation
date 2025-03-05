@@ -11,12 +11,12 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
     raise ValueError("OpenAI API key not found.")
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="../frontend/linkq-frontend/build")
 
 
-@app.route('/')
-def hello_world():  # put application's code here
-    return 'Hello World!'
+@app.route("/")
+def serve():
+    return send_from_directory(app.static_folder, "index.html")
 
 @app.route('/search_entity', methods=['GET'])
 def search_entity_api():
