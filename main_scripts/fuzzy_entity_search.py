@@ -1,8 +1,11 @@
 import os
+import re
 import requests
 import openai
 import spacy
+import json
 from dotenv import load_dotenv
+# from main_scripts.components.query_build import query_building_workflow
 
 # Load environment variables from .env file
 load_dotenv()
@@ -68,12 +71,32 @@ def get_potential_entities(search_term, limit=10):
         response = requests.get(SEARCH_ENDPOINT, headers=HEADERS, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
+        print("[DEBUG] Raw JSON response:")
+        print(json.dumps(data, indent=2))
         entities = []
-        for item in data.get("search", []):
-            entity_id = item.get("id", "")
-            label = item.get("label", "No label available")
-            description = item.get("description", "No description available")
-            entities.append({"entity_id": entity_id, "label": label, "description": description})
+        # for item in data.get("results", {}).get("bindings", []):
+        #     # Adjust extraction as needed; here we assume a common structure.
+        #     entity_value = item.get("entity", {}).get("value", "")
+        #     entity_id = entity_value.split("/")[-1] if entity_value else ""
+        #     label = item.get("entityLabel", {}).get("value", "No label available")
+        #     description = item.get("description", {}).get("value", "No description available")
+        #     entities.append({"entity_id": entity_id, "label": label, "description": description})
+
+        if "search" in data:
+            for item in data.get("search", []):
+                entity_id = item.get("id", "")
+                label = item.get("label", "No label available")
+                description = item.get("description", "No description available")
+                entities.append({"entity_id": entity_id, "label": label, "description": description})
+        else:
+            # Fallback if the structure is different (e.g., a SPARQL-like result)
+            for item in data.get("results", {}).get("bindings", []):
+                entity_value = item.get("entity", {}).get("value", "")
+                entity_id = entity_value.split("/")[-1] if entity_value else ""
+                label = item.get("entityLabel", {}).get("value", "No label available")
+                description = item.get("description", {}).get("value", "No description available")
+                entities.append({"entity_id": entity_id, "label": label, "description": description})
+
         return entities
     except requests.RequestException as e:
         print(f"[DEBUG] Error fetching entities: {e}")
@@ -175,92 +198,29 @@ def ask_llm_to_select_entity(user_query, entities, previous_entity=None):
     
 def parse_command(response_text):
     response_text = response_text.strip()
-    if response_text.upper() == "STOP":
+
+    # Create a dictionary mapping command keywords to their regex patterns
+    commands = {
+        "STOP": r"\bSTOP\b",
+        "ENTITY_SEARCH": r"ENTITY_SEARCH:\s*(.+)",
+        "PROPERTIES_SEARCH": r"PROPERTIES_SEARCH:\s*(.+)",
+        "TAIL_SEARCH": r"TAIL_SEARCH:\s*(.+)",
+        "CLARIFY": r"CLARIFY:\s*(.+)"
+    }
+
+    # Check for STOP (if response is exactly "STOP", or even if found somewhere)
+    if re.search(commands["STOP"], response_text, re.IGNORECASE):
         return "STOP", ""
-    elif response_text.startswith("ENTITY_SEARCH:"):
-        return "ENTITY_SEARCH", response_text[len("ENTITY_SEARCH:"):].strip()
-    elif response_text.startswith("PROPERTIES_SEARCH:"):
-        return "PROPERTIES_SEARCH", response_text[len("PROPERTIES_SEARCH:"):].strip()
-    elif response_text.startswith("TAIL_SEARCH:"):
-        return "TAIL_SEARCH", response_text[len("TAIL_SEARCH:"):].strip()
-    elif response_text.startswith("CLARIFY:"):
-        return "CLARIFY", response_text[len("CLARIFY:"):].strip()
-    else:
-        return "UNKNOWN", response_text
 
-def query_building_workflow(user_message):
-    max_iterations = 20
-    iteration = 0
-    client_instance = openai.OpenAI()
-    collected_data = {}
-
-    initial_system_message = (
-        "You are a query building assistant for our knowledge base. Your task is to analyze "
-        "the user's question and determine the necessary entities and relationships needed "
-        "to build a query. When you need to perform an action, respond with one of these commands:\n"
-        "  - ENTITY_SEARCH: <search term>\n"
-        "  - PROPERTIES_SEARCH: <entity id>\n"
-        "  - TAIL_SEARCH: <entity id>, <property id>\n"
-        "When you have gathered all required information, respond with STOP.\n"
-        f"User question: {user_message}"
-    )
-
-    current_prompt = initial_system_message
-
-    while iteration < max_iterations:
-        iteration += 1
-        response = client_instance.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[{"role": "system", "content": current_prompt}]
-        )
-        resp_text = response.choices[0].message.content.strip()
-        print(f"[Query Strategist] Iteration {iteration}: {resp_text}")
-        command, param = parse_command(resp_text)
-
-        print("[DEBUG]: command: ", command)
-
-        if command == "CLARIFY":
-            print("[Query Strategist] Received CLARIFY command. Breaking out of iterations and returning clarification.")
-            return f"Clarification: {param}"
-
+    # Try to find any of the commands in the text
+    for command, pattern in commands.items():
         if command == "STOP":
-            print("[Query Strategist] Received STOP command. Ending iteration.")
-            break
-        elif command == "ENTITY_SEARCH":
-            results = get_potential_entities(param)
-            collected_data["entities"] = results
-            result_text = f"Entity results: {results}"
-        elif command == "PROPERTIES_SEARCH":
-            # For demonstration, simulate a property lookup.
-            result_text = "Property results: [{'property': 'dummy_property', 'value': 'dummy_value'}]"
-            collected_data["properties"] = result_text
-        elif command == "TAIL_SEARCH":
-            parts = param.split(",")
-            if len(parts) >= 2:
-                ent_id = parts[0].strip()
-                tail_results = find_sub_entities(ent_id)
-                collected_data["tail"] = tail_results
-                result_text = f"Tail results: {tail_results}"
-            else:
-                result_text = "Error: TAIL_SEARCH format invalid."
-        else:
-            result_text = "Error: Unrecognized command."
+            continue  # already handled STOP
+        match = re.search(pattern, response_text, re.IGNORECASE)
+        if match:
+            return command, match.group(1).strip()
 
-        # Update the prompt with the latest result
-        current_prompt = initial_system_message + "\nPrevious Result: " + result_text
-        print(f"[Query Strategist] Updated prompt:\n{current_prompt}\n")
-
-    final_prompt = (
-            initial_system_message + "\nCollected Data: " + str(collected_data) + "\n" +
-            f"Based on the above, construct the final query to answer the user's question: {user_message}"
-    )
-    final_response = client_instance.chat.completions.create(
-        model="gpt-4-turbo",
-        messages=[{"role": "system", "content": final_prompt}]
-    )
-    final_query = final_response.choices[0].message.content.strip()
-    print(f"[Query Strategist] Final query: {final_query}")
-    return final_query
+    return "UNKNOWN", response_text
 
 if __name__ == "__main__":
     import json
