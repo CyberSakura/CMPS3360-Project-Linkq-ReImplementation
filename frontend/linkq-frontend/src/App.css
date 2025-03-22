@@ -89,6 +89,94 @@
   align-self: flex-start;
 }
 
+/* button of copy generated query */
+.copy-query-button {
+  background-color: #007bff; /* A blue color */
+  color: #fff;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  /* Add box-shadow or other styling if desired */
+}
+
+.copy-query-button:hover {
+  background-color: #0056b3; /* Darken on hover */
+}
+
+/* Query Editor Container */
+.query-editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Header and Buttons */
+.query-editor-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.query-editor-title {
+  margin: 0;
+  flex: 1; /* pushes the buttons to the right */
+}
+
+.query-editor-button {
+  margin-right: 4px;
+}
+
+/* Editor Body */
+.query-editor-body {
+  flex: 1;           /* Let it fill available vertical space */
+  overflow: auto;    /* Show scrollbars if content overflows */
+}
+
+/* Modal Overlay */
+.history-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+/* Modal Box */
+.history-modal-box {
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  width: 400px;
+  max-width: 80%;
+}
+
+/* History Items */
+.history-modal-item {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  text-align: left; /* optional, ensure button text is left-aligned */
+}
+
+/* Close Button */
+.history-modal-close {
+  margin-top: 10px;
+}
+
+.query-editor-history-button {
+  font-size: 24px;
+  padding: 8px;
+}
+
 /* Animation */
 @keyframes App-logo-spin {
   from {

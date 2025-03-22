@@ -1,10 +1,26 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
 
+import CodeMirror from "@uiw/react-codemirror";
+import { StreamLanguage } from "@codemirror/language";
+import { sparql } from "@codemirror/legacy-modes/mode/sparql";
+import { EditorView } from "@codemirror/view";
+
+import { IconCaretRight, IconHistory } from "@tabler/icons-react";
+
 const App = () => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState([]);
   const [pendingEntities, setPendingEntities] = useState(null);
+
+  const DEMO_QUERY = `SELECT ?founder ?founderLabel ?birthdate
+      WHERE {
+        wd:Q95 wdt:P112 ?founder.
+        ?founder wdt:P569 ?birthdate.
+        SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }
+      }`;
+  const IS_DEMO_MODE = true;
+  const [queryEditorValue, setQueryEditorValue] = useState(IS_DEMO_MODE ? DEMO_QUERY : "");
 
   useEffect(() => {
     const fetchChatHistory = async () => {
@@ -67,6 +83,121 @@ const App = () => {
     }
   };
 
+  function extractSparqlQuery(replyText) {
+    const regex = /```sparql\s*([\s\S]*?)\s*```/i;
+    const match = replyText.match(regex);
+    return match ? match[1].trim() : '';
+  }
+
+  const runQuery = async () => {
+    console.log("[DEBUG] runQuery() called with queryEditorValue:\n", queryEditorValue);
+
+    try {
+      const response = await fetch("http://127.0.0.1:5000//run_query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: queryEditorValue }),
+      });
+      console.log("[DEBUG] /runQuery response status:", response.status);
+
+      const data = await response.json();
+      console.log("[DEBUG] /runQuery response data:", data);
+
+      if (data.history) {
+        setChatHistory(data.history.reverse());
+      } else {
+        console.log("[DEBUG] No 'history' field in /runQuery response");
+      }
+    } catch (error) {
+      console.error("[ERROR] running query:", error);
+    }
+  };
+
+  function QueryEditorUI({ queryValue, setQueryValue, onRunQuery }){
+    const [queryHistory, setQueryHistory] = useState([]);
+    const [showHistory, setShowHistory] = useState(false);
+
+    const handleRunQuery = () => {
+      if (!queryValue.trim()) return;
+      console.log("[DEBUG] QueryEditorUI handleRunQuery:", queryValue);
+
+      // Add local history entry (optional)
+      const newEntry = {
+        name: `Query #${queryHistory.length + 1}`,
+        query: queryValue,
+      };
+      setQueryHistory([...queryHistory, newEntry]);
+
+      // Actually call parent's runQuery function
+      onRunQuery();
+    };
+
+
+    const handleHistoryClick = (item) => {
+      setQueryValue(item.query);
+      setShowHistory(false);
+    };
+
+    return (
+      <div className="query-editor-container">
+        <div className="query-editor-header">
+          <h4 className="query-editor-title">Query Editor</h4>
+          <button
+            className="query-editor-button"
+            onClick={handleRunQuery}
+            aria-label="Run Query"
+          >
+            ►
+          </button>
+          <button
+            className="query-editor-history-button"
+            onClick={() => setShowHistory(true)}
+            aria-label="History"
+          >
+            ⟳
+          </button>
+        </div>
+
+      <div className="query-editor-body">
+        <CodeMirror
+          value={queryValue}
+          height="100%"
+          extensions={[
+            StreamLanguage.define(sparql),
+            // Enable line wrapping:
+            EditorView.lineWrapping
+          ]}
+          onChange={(val) => setQueryValue(val)}
+        />
+      </div>
+
+        {showHistory && (
+          <div className="history-modal-overlay">
+            <div className="history-modal-box">
+              <h2>Query History</h2>
+              <hr />
+              {queryHistory.map((item, index) => (
+                <button
+                  key={index}
+                  className="history-modal-item"
+                  onClick={() => handleHistoryClick(item)}
+                >
+                  {item.name}
+                </button>
+              ))}
+              <button
+                className="history-modal-close"
+                onClick={() => setShowHistory(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen w-screen flex">
       {/* Left Chat Panel */}
@@ -74,19 +205,46 @@ const App = () => {
         <div className="mb-4">Settings</div>
         <div className="flex-1 border border-gray-700 rounded p-2 overflow-auto chat-container">
           {chatHistory.length > 0 ? (
-              chatHistory.map((chat, index) => (
-                  <div key={index} className="chat-wrapper">
-                    {/* User message */}
-                    <div className="chat-meta user-meta">User, chat #{index}</div>
-                    <div className="chat-bubble user">{chat.user}</div>
+            chatHistory.map((chat, index) => {
+              const isSystem = (chat.user === "system");
+              const label = isSystem
+                ? `system, chat #${index}`
+                : `GPT-4-turbo-preview, chat #${index}`;
 
-                    {/* Bot message */}
-                    <div className="chat-meta bot-meta">GPT-4-turbo-preview, chat #{index}</div>
-                    <div className="chat-bubble bot">{chat.bot}</div>
-                  </div>
-              ))
+              return (
+                <div key={index} className="chat-wrapper">
+                  {/* User message */}
+                  {/* If user is "system", you might skip showing a "user" bubble, or handle differently */}
+                  {(!isSystem) && (
+                    <>
+                      <div className="chat-meta user-meta">User, chat #{index}</div>
+                      <div className="chat-bubble user">{chat.user}</div>
+                    </>
+                  )}
+
+                  {/* Bot or system message */}
+                  <div className="chat-meta bot-meta">{label}</div>
+                  <div className="chat-bubble bot">{chat.bot}</div>
+
+                  {/* Conditionally render the copy button if a SPARQL query is detected */}
+                  {extractSparqlQuery(chat.bot) && (
+                    <div style={{ marginTop: "8px" }}>
+                      <button
+                        className="copy-query-button"
+                        onClick={() => {
+                          const query = extractSparqlQuery(chat.bot);
+                          setQueryEditorValue(query);
+                        }}
+                      >
+                        Copy Query to Editor
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
           ) : (
-              <p className="text-gray-400">No messages yet.</p>
+            <p className="text-gray-400">No messages yet.</p>
           )}
         </div>
         <div className="mt-2 border-t border-gray-700 pt-2 flex">
@@ -108,8 +266,13 @@ const App = () => {
 
       {/* Right Side - Four Panels */}
       <div className="w-2/3 h-full flex flex-col p-2 bg-gray-100">
+        {/* Query Editor */}
         <div className="h-1/4 border border-gray-400 bg-white p-2 rounded">
-          Query Editor (Placeholder)
+           <QueryEditorUI
+            queryValue={queryEditorValue}
+            setQueryValue={setQueryEditorValue}
+            onRunQuery={runQuery}
+          />
         </div>
         <div className="h-1/4 border border-gray-400 bg-white p-2 rounded mt-2">
           Entity-Relation Table (Placeholder)

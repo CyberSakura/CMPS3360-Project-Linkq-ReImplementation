@@ -93,49 +93,6 @@ def handle_chat(user_message):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-# def handle_chat(user_message):
-#     try:
-#         conn = sqlite3.connect(DB_PATH)
-#         cursor = conn.cursor()
-#
-#         print(f"[DEBUG] Processing user message: {user_message}")
-#
-#         # Instead of a direct LLM call, let's say we pass the user message
-#         # to our query_building_workflow to see if it returns a final SPARQL query
-#         workflow_result = query_building_workflow(user_message)
-#         # workflow_result is a dict: { "sparqlQuery": "...", "summary": "...", "finalAnswer": "..." }
-#
-#         final_answer = workflow_result["finalAnswer"]
-#         sparql_query = workflow_result["sparqlQuery"]
-#         summary = workflow_result["summary"]
-#
-#         # Decide if this is a final query or not (did we parse a code block?)
-#         is_final_query = bool(sparql_query)
-#
-#         # Store the conversation in the database (optional: store final_answer only)
-#         timestamp = datetime.now(timezone.utc).isoformat()
-#         cursor.execute(
-#             "INSERT INTO chats (timestamp, user, bot, entity_context) VALUES (?, ?, ?, ?)",
-#             (timestamp, user_message, final_answer, None)
-#         )
-#         conn.commit()
-#
-#         # Retrieve the latest chat history
-#         cursor.execute("SELECT user, bot FROM chats ORDER BY id DESC LIMIT 10")
-#         chat_history = [{"user": row[0], "bot": row[1]} for row in cursor.fetchall()]
-#         conn.close()
-#
-#         # Return a structured JSON
-#         return jsonify({
-#             "reply": final_answer,
-#             "sparqlQuery": sparql_query,
-#             "summary": summary,
-#             "isFinalQuery": is_final_query,
-#             "history": chat_history
-#         })
-#
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     from flask import Flask
