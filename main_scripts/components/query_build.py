@@ -3,10 +3,10 @@ import os
 import json
 import re
 from main_scripts.fuzzy_entity_search import (
-    parse_command,
     get_potential_entities,
     find_sub_entities,
 )
+from main_scripts.utils.command_parser import parse_command
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,7 +29,7 @@ def parse_final_query_and_summary(text: str):
     }
 
 def query_building_workflow(user_message):
-    max_iterations = 20
+    max_iterations = 5  # Reduced from 20 to prevent excessive iterations
     iteration = 0
     collected_data = {}
 
@@ -38,14 +38,19 @@ def query_building_workflow(user_message):
         {
             "role": "system",
             "content": (
-                "You are a SPARQL query building assistant for our knowledge base. Analyze the user's question and determine the necessary "
-                "entities and relationships needed to build a SPARQL query. Respond with **only one** of the following commands (and nothing else):\n"
-                "  - ENTITY_SEARCH: <search term>\n"
-                "  - PROPERTIES_SEARCH: <entity id>\n"
-                "  - TAIL_SEARCH: <entity id>, <property id>\n"
-                "  - STOP\n"
-                "  - CLARIFY: <your clarification question>\n\n"
-                "If the question is specific and clear enough, respond with STOP so that the final query is generated immediately.\n"
+                "You are a SPARQL query building assistant for Wikidata. Your role is to help construct precise SPARQL queries.\n\n"
+                "Before starting query construction, ensure the question is specific enough by checking:\n"
+                "1. Are there specific timeframes? (e.g., 'in 2022' not 'recently')\n"
+                "2. Are the entities clearly defined? (e.g., 'Academy Awards' not 'awards')\n"
+                "3. Are the properties specific? (e.g., 'won Best Picture' not 'achievements')\n\n"
+                "If the question is not specific enough, respond with:\n"
+                "CLARIFY: <specific questions to make the query more precise>\n\n"
+                "Only proceed with query construction when the question is specific enough.\n"
+                "When ready, use these commands:\n"
+                "  - ENTITY_SEARCH: <search term>  (to find relevant entities)\n"
+                "  - PROPERTIES_SEARCH: <entity id>  (to find properties of an entity)\n"
+                "  - TAIL_SEARCH: <entity id>, <property id>  (to find related entities)\n"
+                "  - STOP  (when ready to generate final query)\n\n"
                 f"User question: {user_message}"
             )
         }
@@ -65,17 +70,9 @@ def query_building_workflow(user_message):
         command, param = parse_command(resp_text)
         print("[DEBUG]: command:", command)
 
-        # Instead of breaking immediately on CLARIFY, log it.
         if command == "CLARIFY":
-            print("[Query Strategist] Received CLARIFY command. Logging it but forcing STOP after a threshold.")
-            # Optionally, you can log this clarification:
-            messages.append({
-                "role": "system",
-                "content": f"Clarification noted: {param}. Proceeding as if the query is clear."
-            })
-            # Force the workflow to treat it as a STOP after one or two clarifications.
-            if iteration >= 2:  # or use a counter for clarifications
-                command = "STOP"
+            print("[Query Strategist] Received CLARIFY command.")
+            return f"CLARIFY: {param}"
 
         if command == "STOP":
             print("[Query Strategist] Received STOP command. Finalizing query generation.")
@@ -83,18 +80,14 @@ def query_building_workflow(user_message):
             final_messages = [
                 {
                     "role": "system",
-                    "content": f"User question: {user_message}"
-                },
-                {
-                    "role": "system",
-                    "content": f"Collected Data: {json.dumps(collected_data)}"
-                },
-                {
-                    "role": "system",
                     "content": (
-                        "Disregard all previous iterative messages. "
-                        "Based solely on the above, please construct the final SPARQL query to answer the user's question and provide a brief explanation. "
-                        "Return only the SPARQL query and the explanation."
+                        "You are a SPARQL query expert. Based on the collected data, construct a SPARQL query "
+                        "to answer the user's question. Include a brief explanation of the query.\n\n"
+                        f"User question: {user_message}\n"
+                        f"Collected Data: {json.dumps(collected_data)}\n\n"
+                        "Return the response in this format:\n"
+                        "```sparql\n[SPARQL QUERY]\n```\n"
+                        "Explanation: [Brief explanation of the query]"
                     )
                 }
             ]
@@ -131,33 +124,24 @@ def query_building_workflow(user_message):
             "role": "system",
             "content": f"Previous result: {result_text}"
         })
-        print(f"[Query Strategist] Updated messages:\n{messages}\n")
 
-        if iteration >= max_iterations or not collected_data.get("entities"):
-            messages.append({
-                "role": "system",
-                "content": (
-                    "No useful entity data has been collected. Despite this, construct a default SPARQL query "
-                    f"to answer the user's question: {user_message}"
-                )
-            })
-            break
+        if iteration >= max_iterations:
+            # If we've reached max iterations, force a STOP
+            command = "STOP"
+            continue
 
-    # Append a final message to instruct the LLM to construct the final query.
+    # If we exit the loop without a STOP command, generate a final query
     final_messages = [
         {
             "role": "system",
-            "content": f"User question: {user_message}"
-        },
-        {
-            "role": "system",
-            "content": f"Collected Data: {json.dumps(collected_data)}"
-        },
-        {
-            "role": "system",
             "content": (
-                "Disregard previous iterative messages. Based solely on the above, please construct the final SPARQL query "
-                "to answer the user's question and provide a brief explanation."
+                "You are a SPARQL query expert. Based on the collected data, construct a SPARQL query "
+                "to answer the user's question. Include a brief explanation of the query.\n\n"
+                f"User question: {user_message}\n"
+                f"Collected Data: {json.dumps(collected_data)}\n\n"
+                "Return the response in this format:\n"
+                "```sparql\n[SPARQL QUERY]\n```\n"
+                "Explanation: [Brief explanation of the query]"
             )
         }
     ]

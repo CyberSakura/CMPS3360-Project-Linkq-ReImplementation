@@ -3,13 +3,15 @@ import re
 import requests
 import openai
 import spacy
-import requests
 import json
 from dotenv import load_dotenv
-
-from main_scripts.components.query_build import query_building_workflow
-
-# from main_scripts.components.query_build import query_building_workflow
+from config import (
+    SPARQL_ENDPOINT,
+    SEARCH_ENDPOINT,
+    HEADERS,
+    ENTITY_TYPES,
+    OPENAI_API_KEY
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,23 +20,6 @@ load_dotenv()
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 if not client.api_key:
     raise ValueError("Missing OpenAI API Key! Please set it in the .env file.")
-
-SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
-SEARCH_ENDPOINT = "https://www.wikidata.org/w/api.php"
-HEADERS = {
-    "User-Agent": "LinkQ-Entity-Search/1.0",
-    "Accept": "application/json"
-}
-
-# Example mapping of user-friendly terms to Wikidata entity types (for debugging)
-ENTITY_TYPES = {
-    "cat": "Q146",    # Domestic Cat
-    "dog": "Q144",    # Domestic Dog
-    "city": "Q515",   # Cities
-    "country": "Q6256",  # Countries
-    "person": "Q5",   # Humans
-    "book": "Q571"    # Books
-}
 
 # Initialize spaCy model for English (make sure to download en_core_web_sm)
 nlp = spacy.load("en_core_web_sm")
@@ -199,32 +184,6 @@ def ask_llm_to_select_entity(user_query, entities, previous_entity=None):
         except Exception as e:
             print(f"[DEBUG] Error calling OpenAI API in ask_llm_to_select_entity: {e}")
             return None
-    
-def parse_command(response_text):
-    response_text = response_text.strip()
-
-    # Create a dictionary mapping command keywords to their regex patterns
-    commands = {
-        "STOP": r"\bSTOP\b",
-        "ENTITY_SEARCH": r"ENTITY_SEARCH:\s*(.+)",
-        "PROPERTIES_SEARCH": r"PROPERTIES_SEARCH:\s*(.+)",
-        "TAIL_SEARCH": r"TAIL_SEARCH:\s*(.+)",
-        "CLARIFY": r"CLARIFY:\s*(.+)"
-    }
-
-    # Check for STOP (if response is exactly "STOP", or even if found somewhere)
-    if re.search(commands["STOP"], response_text, re.IGNORECASE):
-        return "STOP", ""
-
-    # Try to find any of the commands in the text
-    for command, pattern in commands.items():
-        if command == "STOP":
-            continue  # already handled STOP
-        match = re.search(pattern, response_text, re.IGNORECASE)
-        if match:
-            return command, match.group(1).strip()
-
-    return "UNKNOWN", response_text
 
 if __name__ == "__main__":
     import json

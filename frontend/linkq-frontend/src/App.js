@@ -1,18 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import "./App.css";
-
-import CodeMirror from "@uiw/react-codemirror";
-import { StreamLanguage } from "@codemirror/language";
-import { sparql } from "@codemirror/legacy-modes/mode/sparql";
-import { EditorView } from "@codemirror/view";
-
-import { IconCaretRight, IconHistory } from "@tabler/icons-react";
+import config from './config';
+import QueryEditorUI from './components/QueryEditorUI';
+import EntityRelationTable from './components/EntityRelationTable';
 
 const App = () => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState([]);
-  const [pendingEntities, setPendingEntities] = useState(null);
-
+  const [queryResults, setQueryResults] = useState(null);
+  const [queryError, setQueryError] = useState(null);
   const DEMO_QUERY = `SELECT ?founder ?founderLabel ?birthdate
       WHERE {
         wd:Q95 wdt:P112 ?founder.
@@ -21,13 +17,15 @@ const App = () => {
       }`;
   const IS_DEMO_MODE = true;
   const [queryEditorValue, setQueryEditorValue] = useState(IS_DEMO_MODE ? DEMO_QUERY : "");
+  const queryEditorRef = useRef(null);
 
   useEffect(() => {
     const fetchChatHistory = async () => {
       try {
-        const response = await fetch("http://127.0.0.1:5000/chat-history");
+        const response = await fetch(`${config.API_BASE_URL}/chat-history`);
         const data = await response.json();
-        setChatHistory(data.history.reverse()); // Reverse order to show newest at the bottom
+        // Don't set any history on initial load
+        setChatHistory([]);
       } catch (error) {
         console.error("Error fetching chat history:", error);
       }
@@ -43,7 +41,7 @@ const App = () => {
     console.log("Sending message:", finalMessage);
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/chat", {
+      const response = await fetch(`${config.API_BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: finalMessage }),
@@ -59,13 +57,14 @@ const App = () => {
       }
 
       const newMessage = {
-        user: finalMessage, // Store user message
-        bot: data.reply, // Store bot response
-        chatId: chatHistory.length, // Assign message number
+        user: finalMessage,
+        bot: data.reply,
+        chatId: chatHistory.length,
+        isUserMessage: true
       };
 
-      setChatHistory((prevChat) => [...prevChat, newMessage]); // Append both messages
-      setMessage(""); // Clear input
+      setChatHistory((prevChat) => [...prevChat, newMessage]);
+      setMessage("");
 
     } catch (error) {
       console.error("Error sending message:", error);
@@ -84,164 +83,164 @@ const App = () => {
   };
 
   function extractSparqlQuery(replyText) {
+    if (!replyText || typeof replyText !== 'string') {
+      return '';
+    }
     const regex = /```sparql\s*([\s\S]*?)\s*```/i;
     const match = replyText.match(regex);
     return match ? match[1].trim() : '';
   }
 
-  const runQuery = async () => {
-    console.log("[DEBUG] runQuery() called with queryEditorValue:\n", queryEditorValue);
-
+  const runQuery = async (query) => {
     try {
-      const response = await fetch("http://127.0.0.1:5000//run_query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: queryEditorValue }),
+      // If query is undefined or null, use queryEditorValue
+      const queryToRun = query || queryEditorValue;
+      const cleanedQuery = queryToRun.trim();
+      
+      if (!cleanedQuery) {
+        throw new Error('Please enter a query');
+      }
+
+      const response = await fetch(`${config.API_BASE_URL}/run_query`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: cleanedQuery }),
       });
-      console.log("[DEBUG] /runQuery response status:", response.status);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to execute query');
+      }
 
       const data = await response.json();
-      console.log("[DEBUG] /runQuery response data:", data);
-
-      if (data.history) {
-        setChatHistory(data.history.reverse());
-      } else {
-        console.log("[DEBUG] No 'history' field in /runQuery response");
+      
+      // Add query to history via QueryEditorUI ref
+      if (queryEditorRef.current) {
+        queryEditorRef.current.addToHistory(cleanedQuery);
       }
+
+      // Set query results for the EntityRelationTable
+      setQueryResults(data.result);
+      setQueryError(null);
+
+      // Update chat with results
+      const newMessage = {
+        type: 'system',
+        user: 'system',
+        bot: JSON.stringify(data.result, null, 2),
+        isUserMessage: false
+      };
+
+      setChatHistory(prev => [...prev, newMessage]);
     } catch (error) {
-      console.error("[ERROR] running query:", error);
+      setQueryError(error.message);
+      const errorMessage = {
+        type: 'system',
+        user: 'system',
+        bot: `Error: ${error.message}`,
+        isUserMessage: false
+      };
+      setChatHistory(prev => [...prev, errorMessage]);
     }
   };
 
-  function QueryEditorUI({ queryValue, setQueryValue, onRunQuery }){
-    const [queryHistory, setQueryHistory] = useState([]);
-    const [showHistory, setShowHistory] = useState(false);
+  // Helper function to format query results
+  const formatQueryResult = (result) => {
+    if (!result || !result.results || !result.results.bindings) {
+      return "No results found";
+    }
 
-    const handleRunQuery = () => {
-      if (!queryValue.trim()) return;
-      console.log("[DEBUG] QueryEditorUI handleRunQuery:", queryValue);
+    const bindings = result.results.bindings;
+    if (bindings.length === 0) {
+      return "No results found";
+    }
 
-      // Add local history entry (optional)
-      const newEntry = {
-        name: `Query #${queryHistory.length + 1}`,
-        query: queryValue,
-      };
-      setQueryHistory([...queryHistory, newEntry]);
+    // Get the variables from the head
+    const variables = result.head.vars;
+    
+    // Create a table-like format
+    let formattedResult = "Results:\n\n";
+    
+    // Add headers
+    formattedResult += variables.join(" | ") + "\n";
+    formattedResult += "-".repeat(variables.join(" | ").length) + "\n";
+    
+    // Add rows
+    bindings.forEach(binding => {
+      const row = variables.map(varName => {
+        const value = binding[varName];
+        return value ? value.value : "";
+      }).join(" | ");
+      formattedResult += row + "\n";
+    });
+    
+    return formattedResult;
+  };
 
-      // Actually call parent's runQuery function
-      onRunQuery();
-    };
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Prevent default behavior (new line)
+      sendMessage();
+    }
+  };
 
+  const handleQueryKeyPress = (e) => {
+    if (e.key === 'Enter' && e.ctrlKey) { // Ctrl+Enter or Cmd+Enter
+      e.preventDefault();
+      runQuery(queryEditorValue);
+    }
+  };
 
-    const handleHistoryClick = (item) => {
-      setQueryValue(item.query);
-      setShowHistory(false);
-    };
-
-    return (
-      <div className="query-editor-container">
-        <div className="query-editor-header">
-          <h4 className="query-editor-title">Query Editor</h4>
-          <button
-            className="query-editor-button"
-            onClick={handleRunQuery}
-            aria-label="Run Query"
-          >
-            ►
-          </button>
-          <button
-            className="query-editor-history-button"
-            onClick={() => setShowHistory(true)}
-            aria-label="History"
-          >
-            ⟳
-          </button>
-        </div>
-
-      <div className="query-editor-body">
-        <CodeMirror
-          value={queryValue}
-          height="100%"
-          extensions={[
-            StreamLanguage.define(sparql),
-            // Enable line wrapping:
-            EditorView.lineWrapping
-          ]}
-          onChange={(val) => setQueryValue(val)}
-        />
-      </div>
-
-        {showHistory && (
-          <div className="history-modal-overlay">
-            <div className="history-modal-box">
-              <h2>Query History</h2>
-              <hr />
-              {queryHistory.map((item, index) => (
-                <button
-                  key={index}
-                  className="history-modal-item"
-                  onClick={() => handleHistoryClick(item)}
-                >
-                  {item.name}
-                </button>
-              ))}
-              <button
-                className="history-modal-close"
-                onClick={() => setShowHistory(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
+  const handleCopyQuery = (query) => {
+    setQueryEditorValue(query);
+    // No need to call handleQueryPaste since we're directly setting the value
+  };
 
   return (
     <div className="h-screen w-screen flex">
       {/* Left Chat Panel */}
-      <div className="w-1/3 h-full bg-gray-900 text-white p-4 flex flex-col">
+      <div className="w-1/3 h-full bg-gray-900 text-white p-4 flex flex-col border-r border-white">
         <div className="mb-4">Settings</div>
         <div className="flex-1 border border-gray-700 rounded p-2 overflow-auto chat-container">
           {chatHistory.length > 0 ? (
             chatHistory.map((chat, index) => {
-              const isSystem = (chat.user === "system");
-              const label = isSystem
-                ? `system, chat #${index}`
-                : `GPT-4-turbo-preview, chat #${index}`;
+              if ((chat.isUserMessage && chat.user) || (chat.type === "system" && chat.bot)) {
+                return (
+                  <div key={index} className="chat-wrapper">
+                    {/* User message */}
+                    {chat.isUserMessage && (
+                      <div className="chat-wrapper user-message">
+                        <div className="chat-meta user-meta">User, chat #{index + 1}</div>
+                        <div className="chat-bubble user">{chat.user}</div>
+                      </div>
+                    )}
 
-              return (
-                <div key={index} className="chat-wrapper">
-                  {/* User message */}
-                  {/* If user is "system", you might skip showing a "user" bubble, or handle differently */}
-                  {(!isSystem) && (
-                    <>
-                      <div className="chat-meta user-meta">User, chat #{index}</div>
-                      <div className="chat-bubble user">{chat.user}</div>
-                    </>
-                  )}
+                    {/* Bot response or query result */}
+                    {chat.bot && (
+                      <div className="chat-wrapper system-message">
+                        <div className="chat-meta bot-meta">
+                          GPT-4-turbo-preview, chat #{index + 1}
+                        </div>
+                        <div className="chat-bubble bot">{chat.bot}</div>
 
-                  {/* Bot or system message */}
-                  <div className="chat-meta bot-meta">{label}</div>
-                  <div className="chat-bubble bot">{chat.bot}</div>
-
-                  {/* Conditionally render the copy button if a SPARQL query is detected */}
-                  {extractSparqlQuery(chat.bot) && (
-                    <div style={{ marginTop: "8px" }}>
-                      <button
-                        className="copy-query-button"
-                        onClick={() => {
-                          const query = extractSparqlQuery(chat.bot);
-                          setQueryEditorValue(query);
-                        }}
-                      >
-                        Copy Query to Editor
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
+                        {extractSparqlQuery(chat.bot) && (
+                          <div style={{ marginTop: "8px" }}>
+                            <button
+                              className="copy-query-button"
+                              onClick={() => handleCopyQuery(extractSparqlQuery(chat.bot))}
+                            >
+                              Copy Query to Editor
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              return null;
             })
           ) : (
             <p className="text-gray-400">No messages yet.</p>
@@ -252,7 +251,8 @@ const App = () => {
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Type a message..."
+              onKeyPress={handleKeyPress}
+              placeholder="Type a message... (Press Enter to send)"
               className="flex-1 p-2 bg-gray-800 text-white rounded"
           />
           <button
@@ -265,23 +265,34 @@ const App = () => {
       </div>
 
       {/* Right Side - Four Panels */}
-      <div className="w-2/3 h-full flex flex-col p-2 bg-gray-100">
+      <div className="w-2/3 h-full flex flex-col p-2 bg-gray-900">
         {/* Query Editor */}
-        <div className="h-1/4 border border-gray-400 bg-white p-2 rounded">
-           <QueryEditorUI
-            queryValue={queryEditorValue}
-            setQueryValue={setQueryEditorValue}
-            onRunQuery={runQuery}
+        <div className="h-1/4 border border-gray-700 bg-white p-2 rounded">
+          <QueryEditorUI
+            value={queryEditorValue}
+            onChange={setQueryEditorValue}
+            onRunQuery={() => runQuery(queryEditorValue)}
+            onKeyPress={handleQueryKeyPress}
+            ref={queryEditorRef}
           />
         </div>
-        <div className="h-1/4 border border-gray-400 bg-white p-2 rounded mt-2">
-          Entity-Relation Table (Placeholder)
+        {/* Entity-Relation Table */}
+        <div className="h-1/4 border border-gray-700 bg-gray-900 p-2 rounded mt-2 text-white">
+          {queryError ? (
+            <div className="text-red-500 p-4">{queryError}</div>
+          ) : queryResults ? (
+            <EntityRelationTable data={queryResults} />
+          ) : (
+            <div className="text-gray-400 p-4">Run a query to see results here</div>
+          )}
         </div>
-        <div className="h-1/4 border border-gray-400 bg-white p-2 rounded mt-2">
-          Query Structure Graph (Placeholder)
+        <div className="h-1/4 border border-gray-700 bg-gray-900 p-2 rounded mt-2 text-white">
+          <h2 className="text-lg font-semibold mb-2 px-4 py-2 bg-gray-800">Query Structure Graph</h2>
+          <div className="text-gray-400">Query Structure Graph (Placeholder)</div>
         </div>
-        <div className="h-1/4 border border-gray-400 bg-white p-2 rounded mt-2">
-          Results Panel (Placeholder)
+        <div className="h-1/4 border border-gray-700 bg-gray-900 p-2 rounded mt-2 text-white">
+          <h2 className="text-lg font-semibold mb-2 px-4 py-2 bg-gray-800">Results Panel</h2>
+          <div className="text-gray-400">Results Panel (Placeholder)</div>
         </div>
       </div>
     </div>

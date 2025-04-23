@@ -38,6 +38,23 @@
   overflow-y: auto;
 }
 
+/* Message Wrapper */
+.chat-wrapper {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+/* System Message (Left) */
+.chat-wrapper.system-message {
+  align-items: flex-start;
+}
+
+/* User Message (Right) */
+.chat-wrapper.user-message {
+  align-items: flex-end;
+}
+
 /* Message Bubble */
 .chat-bubble {
   max-width: 70%;
@@ -49,29 +66,19 @@
 }
 
 /* User Chat */
-.user-chat {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
 .chat-bubble.user {
   background-color: #007bff;
   color: white;
   text-align: left;
+  border-bottom-right-radius: 4px;
 }
 
-/* Bot Chat */
-.bot-chat {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
+/* Bot/System Chat */
 .chat-bubble.bot {
   background-color: #e0e0e0;
   color: black;
   text-align: left;
+  border-bottom-left-radius: 4px;
 }
 
 /* Chat Metadata */
@@ -91,7 +98,7 @@
 
 /* button of copy generated query */
 .copy-query-button {
-  background-color: #007bff; /* A blue color */
+  background-color: #007bff;
   color: #fff;
   padding: 8px 12px;
   font-size: 14px;
@@ -100,11 +107,11 @@
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.2s ease;
-  /* Add box-shadow or other styling if desired */
+  align-self: flex-start;
 }
 
 .copy-query-button:hover {
-  background-color: #0056b3; /* Darken on hover */
+  background-color: #0056b3;
 }
 
 /* Query Editor Container */
@@ -123,7 +130,7 @@
 
 .query-editor-title {
   margin: 0;
-  flex: 1; /* pushes the buttons to the right */
+  flex: 1;
 }
 
 .query-editor-button {
@@ -132,8 +139,8 @@
 
 /* Editor Body */
 .query-editor-body {
-  flex: 1;           /* Let it fill available vertical space */
-  overflow: auto;    /* Show scrollbars if content overflows */
+  flex: 1;
+  overflow: auto;
 }
 
 /* Modal Overlay */
@@ -164,7 +171,7 @@
   display: block;
   width: 100%;
   margin: 6px 0;
-  text-align: left; /* optional, ensure button text is left-aligned */
+  text-align: left;
 }
 
 /* Close Button */

@@ -9,6 +9,7 @@ import openai
 import sqlite3
 import os
 from dotenv import load_dotenv
+from config import DB_PATH, DEBUG, HOST, PORT
 
 load_dotenv()
 
@@ -17,11 +18,16 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
     raise ValueError("OpenAI API key not found.")
 
-
-DB_PATH = "chat_history.db"
-
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # Corrected "origins" to "origins"
+
+# Configure CORS properly
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Ensure database exists
 def init_db():
@@ -76,8 +82,14 @@ def chat_history():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT user, bot FROM chats ORDER BY id DESC LIMIT 10")
-        chat_history = [{"user": row[0], "bot": row[1]} for row in cursor.fetchall()]
+        # Get all messages ordered by timestamp in descending order
+        cursor.execute("SELECT timestamp, user, bot FROM chats ORDER BY timestamp DESC")
+        chat_history = [{
+            "timestamp": row[0],
+            "user": row[1],
+            "bot": row[2],
+            "type": "system" if row[1] == "system" else "user"
+        } for row in cursor.fetchall()]
         conn.close()
 
         return jsonify({"history": chat_history})
@@ -104,7 +116,6 @@ def run_query():
         timestamp = datetime.now(timezone.utc).isoformat()
         result_str = str(result_json)
 
-        print("[DEBUG] result_str is: "+result_str)
         cursor.execute(
             "INSERT INTO chats (timestamp, user, bot, entity_context) VALUES (?, ?, ?, ?)",
             (timestamp, "system", result_str, None)
@@ -116,11 +127,45 @@ def run_query():
         chat_history = [{"user": row[0], "bot": row[1]} for row in cursor.fetchall()]
         conn.close()
 
-        print("[DEBUG] json of result is:", {"result": result_json, "history": chat_history})
-        # Return the results + updated chat history
-        return jsonify({"result": result_json, "history": chat_history}), 200
+        # Include both the query and results in the response
+        return jsonify({
+            "result": result_json,
+            "history": chat_history,
+            "query": query  # Add the original query to the response
+        }), 200
 
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/generate-query-name", methods=["POST"])
+def generate_query_name():
+    try:
+        data = request.get_json()
+        query = data.get("query", "").strip()
+        
+        if not query:
+            return jsonify({"error": "Query is required"}), 400
+
+        # Generate a descriptive name using GPT
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant that generates concise, descriptive names for SPARQL queries. The name should be brief (max 50 characters) but descriptive of what the query does."},
+            {"role": "user", "content": f"Generate a concise name for this SPARQL query:\n\n{query}"}
+        ]
+        
+        client = openai.OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            max_tokens=50,
+            temperature=0.7
+        )
+        
+        query_name = response.choices[0].message.content.strip()
+        
+        return jsonify({"name": query_name})
+
+    except Exception as e:
+        print(f"Error generating query name: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/debug/routes")
@@ -129,4 +174,4 @@ def debug_routes():
 
 if __name__ == '__main__':
     print("AVAILABLE ROUTES:", app.url_map)
-    app.run(debug=True, use_reloader=False)
+    app.run(debug=DEBUG, host=HOST, port=PORT)
