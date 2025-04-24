@@ -1,13 +1,15 @@
 from flask import Flask, request, jsonify, send_from_directory
+import json
+import os
 
 from flask_cors import CORS
 from main_scripts.components.chat import handle_chat
 from main_scripts.components.runQuery import run_sparql_query
+from main_scripts.components.query_graph import parse_sparql_for_graph, enrich_graph_data
 from main_scripts.fuzzy_entity_search import get_potential_entities, ask_llm_to_select_entity
 from datetime import datetime, timezone
 import openai
 import sqlite3
-import os
 from dotenv import load_dotenv
 from config import DB_PATH, DEBUG, HOST, PORT
 
@@ -18,16 +20,48 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 if not openai.api_key:
     raise ValueError("OpenAI API key not found.")
 
-app = Flask(__name__)
+app = Flask(__name__, 
+           static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                    'frontend', 'linkq-frontend', 'build'),
+           static_url_path='')
 
 # Configure CORS properly
 CORS(app, resources={
     r"/*": {
-        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "origins": [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5001",
+            "http://localhost:5002",
+            "http://127.0.0.1:5002"
+        ],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization", "Access-Control-Allow-Origin"],
+        "supports_credentials": True
     }
 })
+
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    allowed_origins = {
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5001",
+        "http://localhost:5002",
+        "http://127.0.0.1:5002"
+    }
+
+    if origin in allowed_origins:
+        # Use assignment to avoid duplicate values
+        response.headers['Access-Control-Allow-Origin'] = origin
+    else:
+        response.headers['Access-Control-Allow-Origin'] = '*'
+
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
 
 # Ensure database exists
 def init_db():
@@ -49,8 +83,14 @@ init_db()
 
 @app.route("/")
 def serve():
-    print(app.url_map)
-    return send_from_directory(app.static_folder, "index.html")
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/<path:path>')
+def static_proxy(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/search_entity', methods=['GET'])
 def search_entity_api():
@@ -168,9 +208,72 @@ def generate_query_name():
         print(f"Error generating query name: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/query-graph", methods=["POST"])
+def get_query_graph():
+    try:
+        data = request.get_json()
+        query = data.get("query", "").strip()
+        if not query:
+            return jsonify({"error": "SPARQL query is required"}), 400
+
+        # Run the query to get entity information
+        query_result = run_sparql_query(query)
+        
+        # Parse the query into graph structure
+        graph_data = parse_sparql_for_graph(query)
+        
+        # Enrich graph data with entity information
+        if 'entity_info' in query_result:
+            graph_data = enrich_graph_data(graph_data, query_result['entity_info'])
+
+        return jsonify({
+            "graph": graph_data,
+            "query": query
+        }), 200
+
+    except Exception as e:
+        print(f"Error generating query graph: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/debug/routes")
 def debug_routes():
     return str(app.url_map)
+
+@app.route("/summarize-results", methods=["POST", "OPTIONS"])
+def summarize_results():
+    if request.method == "OPTIONS":
+        # CORS pre-flight request handled by after_request
+        return "", 200
+
+    try:
+        data = request.get_json()
+        result = data.get("result")
+        query = data.get("query", "")
+
+        if not result:
+            return jsonify({"error": "Result data is required"}), 400
+
+        # Call LLM to summarize (simple placeholder)
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant that summarizes SPARQL query results."},
+            {"role": "user", "content": f"Given the following query and its JSON results, provide a concise summary for a non-technical audience.\n\nQuery:\n{query}\n\nResults JSON:\n{json.dumps(result)[:3000]}"}
+        ]
+
+        client = openai.OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            max_tokens=150,
+            temperature=0.7
+        )
+
+        summary_text = response.choices[0].message.content.strip()
+
+        return jsonify({"summary": summary_text})
+
+    except Exception as e:
+        print(f"Error summarizing results: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     print("AVAILABLE ROUTES:", app.url_map)

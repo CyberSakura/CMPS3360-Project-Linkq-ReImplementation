@@ -1,14 +1,20 @@
 import React, { useState, useEffect, useRef } from "react";
 import "./App.css";
+import { IconSettings } from '@tabler/icons-react';
 import config from './config';
 import QueryEditorUI from './components/QueryEditorUI';
 import EntityRelationTable from './components/EntityRelationTable';
+import ResultsPanel from './components/ResultsPanel';
+import QueryGraph from './components/QueryGraph';
+import SettingsModal from './components/SettingsModal';
 
 const App = () => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState([]);
   const [queryResults, setQueryResults] = useState(null);
   const [queryError, setQueryError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const DEMO_QUERY = `SELECT ?founder ?founderLabel ?birthdate
       WHERE {
         wd:Q95 wdt:P112 ?founder.
@@ -93,6 +99,8 @@ const App = () => {
 
   const runQuery = async (query) => {
     try {
+      setIsLoading(true);
+      setQueryResults(null); // clear old results
       // If query is undefined or null, use queryEditorValue
       const queryToRun = query || queryEditorValue;
       const cleanedQuery = queryToRun.trim();
@@ -143,6 +151,8 @@ const App = () => {
         isUserMessage: false
       };
       setChatHistory(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -202,7 +212,13 @@ const App = () => {
     <div className="h-screen w-screen flex">
       {/* Left Chat Panel */}
       <div className="w-1/3 h-full bg-gray-900 text-white p-4 flex flex-col border-r border-white">
-        <div className="mb-4">Settings</div>
+        <button
+          className="mb-4 px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg text-sm font-semibold self-start flex items-center gap-1 shadow-md transition-colors"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <IconSettings size={18} />
+          Settings
+        </button>
         <div className="flex-1 border border-gray-700 rounded p-2 overflow-auto chat-container">
           {chatHistory.length > 0 ? (
             chatHistory.map((chat, index) => {
@@ -264,10 +280,10 @@ const App = () => {
         </div>
       </div>
 
-      {/* Right Side - Four Panels */}
-      <div className="w-2/3 h-full flex flex-col p-2 bg-gray-900">
+      {/* Right Side - Four Panels (scrollable) */}
+      <div className="w-2/3 h-full flex flex-col p-2 bg-gray-900 overflow-y-auto space-y-2">
         {/* Query Editor */}
-        <div className="h-1/4 border border-gray-700 bg-white p-2 rounded">
+        <div className="border border-gray-700 bg-white p-2 rounded flex-none min-h-[220px]">
           <QueryEditorUI
             value={queryEditorValue}
             onChange={setQueryEditorValue}
@@ -277,24 +293,50 @@ const App = () => {
           />
         </div>
         {/* Entity-Relation Table */}
-        <div className="h-1/4 border border-gray-700 bg-gray-900 p-2 rounded mt-2 text-white">
-          {queryError ? (
+        <div className="border border-gray-700 bg-gray-900 p-2 rounded text-white flex-none">
+          <h2 className="text-lg font-semibold mb-2 px-4 py-2 bg-gray-800">Entity-Relation Table from KG</h2>
+          {isLoading ? (
+            <div className="text-gray-400 p-4">Loading...</div>
+          ) : queryError ? (
             <div className="text-red-500 p-4">{queryError}</div>
           ) : queryResults ? (
-            <EntityRelationTable data={queryResults} />
+            <EntityRelationTable graphData={queryResults} />
           ) : (
-            <div className="text-gray-400 p-4">Run a query to see results here</div>
+            <div className="text-gray-400 p-4">Run a query to see entity information</div>
           )}
         </div>
-        <div className="h-1/4 border border-gray-700 bg-gray-900 p-2 rounded mt-2 text-white">
-          <h2 className="text-lg font-semibold mb-2 px-4 py-2 bg-gray-800">Query Structure Graph</h2>
-          <div className="text-gray-400">Query Structure Graph (Placeholder)</div>
+        {/* Query Structure Graph */}
+        <div className="border border-gray-700 bg-white p-2 rounded flex-none min-h-[280px] overflow-hidden">
+          <h2 className="text-lg font-semibold mb-2 px-4 py-2 bg-gray-800 text-white rounded">Query Structure Graph</h2>
+          {isLoading ? (
+            <div className="text-gray-400 p-4">Loading...</div>
+          ) : queryError ? (
+            <div className="text-red-500 p-4">{queryError}</div>
+          ) : queryResults ? (
+            <div className="h-full">
+              <QueryGraph graphData={queryResults} />
+            </div>
+          ) : (
+            <div className="text-gray-600 p-4">Run a query to see the graph structure</div>
+          )}
         </div>
-        <div className="h-1/4 border border-gray-700 bg-gray-900 p-2 rounded mt-2 text-white">
-          <h2 className="text-lg font-semibold mb-2 px-4 py-2 bg-gray-800">Results Panel</h2>
-          <div className="text-gray-400">Results Panel (Placeholder)</div>
+        {/* Results Panel */}
+        <div className="border border-gray-700 bg-gray-900 p-2 rounded text-white flex-none min-h-[220px]">
+          <h2 className="text-lg font-semibold mb-2 px-4 py-2 bg-gray-800">Query Results</h2>
+          {isLoading ? (
+            <div className="text-gray-400 p-4">Loading...</div>
+          ) : queryError ? (
+            <div className="text-red-500 p-4">{queryError}</div>
+          ) : queryResults ? (
+            <ResultsPanel data={queryResults} />
+          ) : (
+            <div className="text-gray-400 p-4">Run a query to see results</div>
+          )}
         </div>
       </div>
+
+      {/* Settings Modal */}
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 };

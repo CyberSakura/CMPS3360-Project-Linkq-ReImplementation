@@ -10,8 +10,9 @@ def extract_entities(query):
     """Extract entity IDs (Q and P numbers) from a SPARQL query."""
     try:
         # Look for patterns like wd:Q... or wdt:P... or ps:P... or p:P...
-        entity_regex = r'(?:wd:|wdt:|ps:|p:)(Q|P)\d+'
-        matches = re.finditer(entity_regex, query)
+        entity_regex = r'(?:wd:|wdt:|ps:|p:|pq:)(Q|P)\d+'
+        matches = list(re.finditer(entity_regex, query))
+        print(f"[DEBUG] Raw entity matches: {[m.group() for m in matches]}")
         entities = [match.group() for match in matches]
         # Remove the prefix (wd:, wdt:, etc.) to get just the entity ID
         entities = [e.split(':')[1] for e in entities]

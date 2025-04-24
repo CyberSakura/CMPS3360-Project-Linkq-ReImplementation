@@ -1,5 +1,5 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { IconCaretRight, IconHistory } from '@tabler/icons-react';
+import { IconCaretRight, IconHistory, IconTrash } from '@tabler/icons-react';
 import CodeMirror from "@uiw/react-codemirror";
 import { StreamLanguage } from "@codemirror/language";
 import { sparql } from "@codemirror/legacy-modes/mode/sparql";
@@ -25,9 +25,11 @@ const QueryEditorUI = forwardRef(({ value, onChange, onRunQuery, onKeyPress }, r
   }, []);
 
   useEffect(() => {
-    // Save history to localStorage whenever it changes
+    // Sync history to localStorage whenever it changes
     if (history.length > 0) {
       localStorage.setItem('queryHistory', JSON.stringify(history));
+    } else {
+      localStorage.removeItem('queryHistory');
     }
   }, [history]);
 
@@ -81,6 +83,15 @@ const QueryEditorUI = forwardRef(({ value, onChange, onRunQuery, onKeyPress }, r
     setShowHistory(false);
   };
 
+  // Clear query history handler
+  const handleClearHistory = () => {
+    if (history.length === 0) return;
+    if (window.confirm('Are you sure you want to delete all query history?')) {
+      setHistory([]);
+      localStorage.removeItem('queryHistory');
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-2 p-2 bg-gray-100 rounded-t-lg">
@@ -93,6 +104,14 @@ const QueryEditorUI = forwardRef(({ value, onChange, onRunQuery, onKeyPress }, r
           >
             <IconHistory size={20} />
             History ({history.length})
+          </button>
+          <button
+            onClick={handleClearHistory}
+            className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
+            title="Clear Query History"
+          >
+            <IconTrash size={20} />
+            Clear
           </button>
           <button
             onClick={() => onRunQuery(value)}
