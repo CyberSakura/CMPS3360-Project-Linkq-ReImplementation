@@ -11,6 +11,17 @@ const ResultsPanel = ({ data }) => {
   useEffect(() => {
     const fetchSummary = async () => {
       if (!data) return;
+
+      // Determine if the query returned any bindings
+      const hasBindings = Array.isArray(data?.main_results?.results?.bindings) &&
+                          data.main_results.results.bindings.length > 0;
+
+      // If there are no bindings, we can short-circuit and show a default message
+      if (!hasBindings) {
+        setSummary("The query did not return any results. It is possible that your query is too restrictive or that the data does not exist in Wikidata.");
+        return;
+      }
+
       try {
         setLoadingSummary(true);
         const resp = await fetch(`${config.API_BASE_URL}/summarize-results`, {
@@ -33,13 +44,11 @@ const ResultsPanel = ({ data }) => {
   const results = data?.main_results?.results;
   const bindings = results?.bindings;
 
-  if (!data || !results || !bindings || bindings.length === 0) {
-    return (
-      <div className="text-gray-400 p-4">No results found</div>
-    );
+  if (!data || !results) {
+    return <div className="text-gray-400 p-4">No results available</div>;
   }
 
-  const variables = data.main_results.head.vars;
+  const variables = data?.main_results?.head?.vars || [];
 
   const extractEntityId = (uri) => {
     if (!uri) return null;
@@ -125,35 +134,39 @@ const ResultsPanel = ({ data }) => {
         <h3 className="font-bold">Results Table from KG</h3>
       </div>
 
-      {/* Results table */}
-      <div className="h-full overflow-y-auto">
-        <div className="min-w-full inline-block align-middle">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-700">
-              <thead className="sticky top-0 bg-gray-800">
-                <tr>
-                  {variables.map((variable) => (
-                    <th key={variable} scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-300 uppercase">
-                      {variable}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-700">
-                {bindings.map((result, index) => (
-                  <tr key={index} className={index % 2 === 0 ? 'bg-gray-900' : 'bg-gray-800'}>
+      {/* Results table or fallback */}
+      {bindings && bindings.length > 0 ? (
+        <div className="h-full overflow-y-auto">
+          <div className="min-w-full inline-block align-middle">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-700">
+                <thead className="sticky top-0 bg-gray-800">
+                  <tr>
                     {variables.map((variable) => (
-                      <td key={variable} className="px-4 py-2 text-sm text-gray-300 whitespace-nowrap">
-                        {formatValue(result[variable])}
-                      </td>
+                      <th key={variable} scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-300 uppercase">
+                        {variable}
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-700">
+                  {bindings.map((result, index) => (
+                    <tr key={index} className={index % 2 === 0 ? 'bg-gray-900' : 'bg-gray-800'}>
+                      {variables.map((variable) => (
+                        <td key={variable} className="px-4 py-2 text-sm text-gray-300 whitespace-nowrap">
+                          {formatValue(result[variable])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="text-gray-400 p-4">No results found</div>
+      )}
       {tooltipData && <EntityTooltip {...tooltipData} />}
     </div>
   );

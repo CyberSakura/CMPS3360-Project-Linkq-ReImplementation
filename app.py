@@ -149,6 +149,15 @@ def run_query():
         # Run the query
         result_json = run_sparql_query(query)
 
+        # Detect if there are no bindings in the response
+        no_results = False
+        try:
+            bindings = result_json.get('main_results', {}).get('results', {}).get('bindings', [])
+            if len(bindings) == 0:
+                no_results = True
+        except Exception:
+            pass
+
         # Store in DB as a new message with user="system"
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -171,7 +180,8 @@ def run_query():
         return jsonify({
             "result": result_json,
             "history": chat_history,
-            "query": query  # Add the original query to the response
+            "query": query,  # Add the original query to the response
+            "no_results": no_results
         }), 200
 
     except Exception as e:

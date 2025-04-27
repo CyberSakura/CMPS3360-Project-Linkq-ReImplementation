@@ -130,15 +130,22 @@ const App = () => {
         queryEditorRef.current.addToHistory(cleanedQuery);
       }
 
-      // Set query results for the EntityRelationTable
+      // Set query results for the EntityRelationTable and ResultsPanel
       setQueryResults(data.result);
       setQueryError(null);
 
-      // Update chat with results
+      // Determine if there are any bindings in the response
+      const bindings = data?.result?.main_results?.results?.bindings || [];
+
+      // Craft chat panel message based on whether results were found
+      const chatText = bindings.length === 0
+        ? 'No results found.'
+        : JSON.stringify(data.result, null, 2);
+
       const newMessage = {
         type: 'system',
         user: 'system',
-        bot: JSON.stringify(data.result, null, 2),
+        bot: chatText,
         isUserMessage: false
       };
 
